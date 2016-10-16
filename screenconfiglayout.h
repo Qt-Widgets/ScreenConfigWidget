@@ -219,8 +219,6 @@ struct Monitor {
         setYOffset(yOffset() + delta.y());
     }
 
-    bool isSelected = false;
-
 public:
     size_t width() const { return mWidth; } ///< screen geometry in pixels
     size_t height() const { return mHeight; } ///< screen geometry in pixels
@@ -281,12 +279,18 @@ class Screen {
         return exists;
     }
 
+    Monitor* getMonitor(const QString& name){
+        for(auto& m : mMonitorList)
+            if(m.getName() == name)
+                return &m;
+        return nullptr;
+    }
+
+    Monitor* mCurrentMonitorSelection = nullptr;
+
 public:
-    const QString currentlySelectedMonitor() {
-        for(auto m : mMonitorList)
-            if(m.isSelected)
-                return m.getName();
-        return "HASHTAG_GOOD_CODING_NO_MONITOR_SELECTED";
+    const Monitor* currentlySelectedMonitor() {
+        return mCurrentMonitorSelection;
     }
 
     void drawText(QPainter& painter, const Monitor& m) {
@@ -320,7 +324,7 @@ public:
         // draw all monitors
         for(const Monitor& monitor : mMonitorList) {
             QColor fillColor;
-            if(monitor.isSelected)
+            if(&monitor == mCurrentMonitorSelection)
                 fillColor = Qt::GlobalColor::darkGray;
             else
                 fillColor = Qt::GlobalColor::lightGray;
@@ -339,12 +343,18 @@ public:
         mMonitorList.remove_if([name](Monitor& m) {
             return m.getName() == name;
         });
+
+        // if we delete a monitor, the pointer may become invalid
+        mCurrentMonitorSelection = nullptr;
     }
 
     bool addMonitor(const QString& name, int xRes, int yRes, int xOff = 0, int yOff = 0, int horLetterBox = 0, int verLetterBox = 0) {
         // allow unique names only
         if(monitorExists(name))
             return false;
+
+        // if we add a monitor, the pointer may become invalid
+        mCurrentMonitorSelection = nullptr;
 
         // add monitor
         mMonitorList.push_back(Monitor(name, xRes, yRes, xOff, yOff, horLetterBox, verLetterBox));
@@ -355,7 +365,7 @@ public:
 
     void moveMonitors(Monitor* mon, const QPoint& target, const QPoint& source, const QRect& bounding) {
         if(mon){
-            mon->isSelected = true;
+            mCurrentMonitorSelection = mon;
             snap(*mon, target, source, bounding);
         }
     }
@@ -441,32 +451,19 @@ public:
      * @brief Toggle the selection state of a single monitor; returns true if the monitor is now selected
      */
     bool toggleSingleMonitorSelection(const QString& selection) {
-        // select only the monitor named like the selection
-        bool selected = false;
-        for(Monitor& m : mMonitorList){
-            if(m.getName() == selection){
-                m.isSelected = !m.isSelected;
-                selected = m.isSelected;
-            } else
-                m.isSelected = false;
+        // if "selection" is already selected, clear the selection
+        if(mCurrentMonitorSelection && mCurrentMonitorSelection->getName() == selection){
+            mCurrentMonitorSelection = nullptr;
+            return false;
         }
-        return selected;
-    }
-
-    void setSingleMonitorSelection(const QString& selection, bool select){
-        for(Monitor& m : mMonitorList){
-            if(m.getName() == selection){
-                m.isSelected = select;
-
-            }
-            else
-                m.isSelected = false;
+        else{
+            mCurrentMonitorSelection = getMonitor(selection);
+            return true;
         }
     }
 
-    void setAllMonitorSelection(bool select){
-        for(Monitor& m : mMonitorList)
-            m.isSelected = select;
+    void deselectCurrent(){
+        mCurrentMonitorSelection = nullptr;
     }
 
     Monitor* getMonitor(const QPoint &pos) {
@@ -553,7 +550,7 @@ public:
         mScreen = new Screen();
     }
 
-    const QString currentlySelectedMonitor() {
+    const Monitor* currentlySelectedMonitor() {
         return mScreen->currentlySelectedMonitor();
     }
 
@@ -612,7 +609,8 @@ protected:
 
     // mouse signals
 signals:
-    void onMonitorSelected(Monitor* selection, bool selected);
+    void onMonitorSelected(Monitor* selection);
+    void onMonitorDeSelected();
     void onMonitorMoved(Monitor* selection);
 
     // mouse handling functions
@@ -660,14 +658,17 @@ protected:
             Monitor* selected = mScreen->getMonitor(position);
 
             if(!selected){
-                mScreen->setAllMonitorSelection(false);
+                mScreen->deselectCurrent();
+                emit onMonitorDeSelected();
             } else {
                 // select clicked monitor
                 bool selectionState =
                         mScreen->toggleSingleMonitorSelection(selected->getName());
 
-                // notify user
-                emit onMonitorSelected(selected, selectionState);
+                if(selectionState)
+                    emit onMonitorSelected(selected);
+                else
+                    emit onMonitorDeSelected();
             }
         } else {
             // get clicked border
@@ -841,14 +842,21 @@ private:
 
     // slots for handling monitor configuration
 private slots:
-    void onMonitorSelected(Monitor* selection, bool selected){
+
+    void onMonitorDeselected(){
         // if a monitor is selected, the add button will be disabled, vice versa with remove button
-        mAddButton->setEnabled(!selected);
-        mDeleteButton->setEnabled(selected);
+        mAddButton->setEnabled(true);
+        mDeleteButton->setEnabled(false);
 
-        connect(mHorizontalResolutionInput, SIGNAL(textChanged(QString)), this, SLOT(updateCurrentMonitor()));
+        mLastSelectedMonitor = nullptr;
+    }
 
-        mLastSelectedMonitor = selected ? selection : nullptr;
+    void onMonitorSelected(Monitor* selection){
+        // if a monitor is selected, the add button will be disabled, vice versa with remove button
+        mAddButton->setEnabled(false);
+        mDeleteButton->setEnabled(true);
+
+        mLastSelectedMonitor = selection;
 
         readMonitorConfigToUi(mLastSelectedMonitor);
     }
@@ -905,23 +913,22 @@ private slots:
 
     void onDeleteButton() {
         // retrieve monitor selection
-        const QString& selected = mDisplayWidget->currentlySelectedMonitor();
+        const Monitor* selected = mDisplayWidget->currentlySelectedMonitor();
 
-        // abort if no monitor was selected
-        if(selected == "HASHTAG_GOOD_CODING_NO_MONITOR_SELECTED")
-            return;
+        // removal should only be available when a monitor is selected
+        assert(selected);
 
         // show warning
         int del = QMessageBox::warning(
                       this->parentWidget(),
                       "Delete monitor",
-                      "Do you really want to delete " + selected + "?",
+                      "Do you really want to delete " + selected->getName() + "?",
                       QMessageBox::Yes,
                       QMessageBox::No | QMessageBox::Escape);
 
         // delete monitor if yes was selected
         if(del == QMessageBox::Yes)
-            mDisplayWidget->deleteMonitor(selected);
+            mDisplayWidget->deleteMonitor(selected->getName());
     }
 
     // init member functions
@@ -933,9 +940,18 @@ private:
         connect(mNextModeButton, SIGNAL(clicked()), this, SLOT(onNextModeButton()));
         connect(mPrevModeButton, SIGNAL(clicked()), this, SLOT(onPrevModeButton()));
 
-
-        connect(mDisplayWidget, SIGNAL(onMonitorSelected(Monitor*, bool)), this, SLOT(onMonitorSelected(Monitor*, bool)));
+        // when the monitor changes, update the ui
+        connect(mDisplayWidget, SIGNAL(onMonitorSelected(Monitor*)), this, SLOT(onMonitorSelected(Monitor*)));
+        connect(mDisplayWidget, SIGNAL(onMonitorDeSelected()), this, SLOT(onMonitorDeselected()));
         connect(mDisplayWidget, SIGNAL(onMonitorMoved(Monitor*)), this, SLOT(readMonitorConfigToUi(Monitor*)));
+
+        // when the ui changes, update the monitor
+        connect(mHorizontalResolutionInput, SIGNAL(textChanged(QString)), this, SLOT(updateCurrentMonitor()));
+        connect(mVerticalResolutionInput, SIGNAL(textChanged(QString)), this, SLOT(updateCurrentMonitor()));
+        connect(mXOffInput, SIGNAL(textChanged(QString)), this, SLOT(updateCurrentMonitor()));
+        connect(mYOffInput, SIGNAL(textChanged(QString)), this, SLOT(updateCurrentMonitor()));
+        connect(mHorLetterboxInput, SIGNAL(textChanged(QString)), this, SLOT(updateCurrentMonitor()));
+        connect(mVerLetterBoxInput, SIGNAL(textChanged(QString)), this, SLOT(updateCurrentMonitor()));
     }
 
     void layoutMonitorConfig() {
@@ -973,6 +989,7 @@ private:
 
         // delete button
         mDeleteButton = new QPushButton("Remove screen");
+        mDeleteButton->setDisabled(true);
         monitorConfigurationLayout->addRow(mDeleteButton);
     }
 
