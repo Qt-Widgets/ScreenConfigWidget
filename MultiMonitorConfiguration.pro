@@ -14,11 +14,6 @@ TEMPLATE = app
 # c++11
 CONFIG += c++11
 
-# magick++
-QMAKE_CXXFLAGS += $(shell Magick++-config --cppflags --cxxflags)
-LIBS += $(shell Magick++-config --ldflags --libs)
-INCLUDEPATH += /usr/include/ImageMagick-6/
-
 
 SOURCES += main.cpp\
         mainwindow.cpp

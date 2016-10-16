@@ -6,21 +6,21 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>400</width>
-    <height>300</height>
+    <width>668</width>
+    <height>415</height>
    </rect>
   </property>
   <property name="windowTitle">
    <string>MainWindow</string>
   </property>
-  <widget class="ScreenConfigLayout" name="centralWidget"/>
+  <widget class="ScreenConfigWidget::ScreenConfigLayout" name="centralWidget"/>
   <widget class="QMenuBar" name="menuBar">
    <property name="geometry">
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>400</width>
-     <height>19</height>
+     <width>668</width>
+     <height>22</height>
     </rect>
    </property>
   </widget>
@@ -37,7 +37,7 @@
  <layoutdefault spacing="6" margin="11"/>
  <customwidgets>
   <customwidget>
-   <class>ScreenConfigLayout</class>
+   <class>ScreenConfigWidget::ScreenConfigLayout</class>
    <extends>QWidget</extends>
    <header>screenconfiglayout.h</header>
    <container>1</container>
